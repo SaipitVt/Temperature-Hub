@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ATC Monitor Master/Slave</title>
     
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0c1015">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
     <style>
@@ -134,7 +138,6 @@
         percent = Math.max(0, Math.min(1, percent));
         
         const fullArc = 157; 
-        // Исправлено: использование style.strokeDashoffset для корректного отображения закраски
         gaugeFill.style.strokeDashoffset = (fullArc - (percent * fullArc)).toString();
         
         const angle = Math.PI + (percent * Math.PI);
@@ -293,7 +296,15 @@
             await startBLE();
         } catch (err) { alert(err.message); }
     };
+
+    // Регистрация Service Worker для PWA
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js')
+                .then(reg => console.log('PWA: Ready'))
+                .catch(err => console.log('PWA: Error', err));
+        });
+    }
 </script>
 </body>
 </html>
-
