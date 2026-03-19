@@ -2,59 +2,182 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ATC Monitor Master/Slave</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ATC Monitor Widget</title>
     
-    <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0c1015">
-    <link rel="apple-touch-icon" href="icon-192.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
     <style>
-        body { margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center; background: #0c1015; font-family: 'Segoe UI', sans-serif; color: white; overflow: hidden; }
-        .card { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(25px); border-radius: 40px; padding: 30px; width: 340px; text-align: center; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 30px 60px rgba(0,0,0,0.6); }
-        .status-tag { font-size: 0.65rem; padding: 5px 12px; border-radius: 12px; background: rgba(0,0,0,0.3); display: inline-block; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700; color: #888; }
+        :root {
+            --bg-dark: #0c1015;
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --accent-green: #2ecc71;
+            --accent-blue: #4dadff;
+            --accent-red: #e74c3c;
+            --accent-yellow: #f1c40f;
+            --transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
 
-        .gauge-wrapper { position: relative; width: 300px; height: 180px; margin: 0 auto; overflow: visible; }
+        body { 
+            margin: 0; 
+            height: 100vh; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            background: var(--bg-dark); 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            color: white; 
+            overflow: hidden; 
+        }
+
+        /* Main Card Container */
+        .card { 
+            background: var(--card-bg); 
+            backdrop-filter: blur(25px); 
+            -webkit-backdrop-filter: blur(25px);
+            border-radius: 40px; 
+            padding: 30px; 
+            width: 90%;
+            max-width: 340px; 
+            text-align: center; 
+            border: 1px solid rgba(255,255,255,0.08); 
+            box-shadow: 0 30px 60px rgba(0,0,0,0.6); 
+            position: relative;
+            transition: var(--transition);
+        }
+
+        /* Widget Mode Transformations */
+        body.widget-mode .card {
+            max-width: 180px;
+            padding: 20px;
+            border-radius: 30px;
+        }
+
+        body.widget-mode .info-grid, 
+        body.widget-mode .trend-row,
+        body.widget-mode #connect,
+        body.widget-mode .status-tag {
+            display: none;
+        }
+
+        body.widget-mode .gauge-wrapper {
+            height: 120px;
+        }
+
+        body.widget-mode .value {
+            font-size: 2.8rem;
+        }
+
+        /* Controls */
+        .top-actions {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            z-index: 10;
+        }
+
+        .icon-btn {
+            cursor: pointer;
+            color: #888;
+            transition: 0.2s;
+            padding: 5px;
+        }
+        .icon-btn:active { transform: scale(1.2); }
+        .icon-btn.active { color: var(--accent-yellow); }
+
+        .alarm-panel {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            background: rgba(20, 25, 30, 0.98);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 15px;
+            width: 200px;
+            display: none;
+            flex-direction: column;
+            gap: 12px;
+            z-index: 20;
+            text-align: left;
+        }
+        .alarm-panel.show { display: flex; }
+        .alarm-panel label { font-size: 0.7rem; color: #aaa; display: flex; justify-content: space-between; }
+        .alarm-panel input[type="range"] { width: 100%; accent-color: var(--accent-yellow); }
+
+        /* Status & Gauges */
+        .status-tag { 
+            font-size: 0.65rem; 
+            padding: 5px 12px; 
+            border-radius: 12px; 
+            background: rgba(0,0,0,0.3); 
+            display: inline-block; 
+            margin: 15px 0 10px; 
+            text-transform: uppercase; 
+            letter-spacing: 1px;
+            color: #888; 
+        }
+
+        .gauge-wrapper { position: relative; width: 100%; height: 180px; transition: var(--transition); }
         .gauge-svg { width: 100%; height: 100%; overflow: visible; }
-        .gauge-track { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 12; stroke-linecap: round; }
-        .gauge-fill { fill: none; stroke: url(#gauge-gradient); stroke-width: 12; stroke-linecap: round; stroke-dasharray: 157; stroke-dashoffset: 157; transition: stroke-dashoffset 0.8s ease; }
-        .gauge-dot { fill: #fff; filter: drop-shadow(0 0 8px rgba(255,255,255,0.8)); transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
+        .gauge-track { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 10; stroke-linecap: round; }
+        .gauge-fill { fill: none; stroke: url(#gauge-gradient); stroke-width: 10; stroke-linecap: round; stroke-dasharray: 157; stroke-dashoffset: 157; transition: stroke-dashoffset 0.8s ease-out; }
 
         .temp-main { position: absolute; top: 72%; left: 50%; transform: translate(-50%, -50%); width: 100%; }
-        .value { font-size: 4.2rem; font-weight: 600; margin: 0; line-height: 1; letter-spacing: -2px; }
-        .status-text { font-size: 0.85rem; font-weight: 800; margin-top: 8px; text-transform: uppercase; letter-spacing: 2px; }
+        .value { font-size: 4.2rem; font-weight: 600; margin: 0; transition: var(--transition); }
+        .status-text { font-size: 0.7rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
 
-        .trend-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 15px 0; }
+        /* Grid & Buttons */
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); }
+        .info-label { font-size: 0.6rem; opacity: 0.4; text-transform: uppercase; }
+        .info-val { font-size: 0.9rem; font-weight: 600; }
         
-        .extreme-pill {
-            width: 70px; height: 50px; border-radius: 18px; 
-            background: #0c1015; display: flex; flex-direction: column; 
-            align-items: center; justify-content: center;
-            box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.5), -2px -2px 8px rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.02);
+        #connect { margin-top: 20px; padding: 15px; width: 100%; border-radius: 15px; border: none; font-weight: 800; background: var(--accent-green); color: white; cursor: pointer; }
+
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.4); }
+            70% { box-shadow: 0 0 0 20px rgba(231, 76, 60, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
         }
-        .ex-label { font-size: 0.55rem; font-weight: 900; color: #666; text-transform: uppercase; margin-bottom: 2px; }
-        .ex-val { font-size: 1rem; font-weight: 700; }
-        #t-min { color: #4dadff; }
-        #t-max { color: #ff5e5e; }
+        .alarm-triggered { animation: pulse-red 1.5s infinite; border-color: var(--accent-red) !important; }
 
-        .trend-box { font-size: 0.75rem; padding: 6px 10px; border-radius: 10px; background: rgba(0,0,0,0.2); font-weight: 600; flex: 1; }
-
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.08); }
-        .info-item { display: flex; flex-direction: column; align-items: center; }
-        .info-label { font-size: 0.6rem; opacity: 0.4; text-transform: uppercase; letter-spacing: 1px; }
-        .info-val { font-size: 1rem; font-weight: 600; margin-top: 4px; }
-        
-        button { margin-top: 25px; padding: 18px; width: 100%; border-radius: 20px; border: none; font-size: 0.9rem; font-weight: 800; cursor: pointer; background: #2ecc71; color: white; transition: 0.3s; text-transform: uppercase; }
-        .trend-up { color: #ff5e5e; } .trend-down { color: #4dadff; } .trend-stable { color: #888; }
+        #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #222; padding: 8px 16px; border-radius: 20px; font-size: 0.75rem; display: none; z-index: 100; border: 1px solid #444; }
     </style>
 </head>
 <body>
 
-<div class="card">
-    <div id="status" class="status-tag">Ожидание данных</div>
+<div id="main-card" class="card">
+    <div class="top-actions">
+        <!-- Widget Mode Toggle -->
+        <div id="widget-toggle" class="icon-btn" title="Виджет">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="3" y1="9" x2="21" y2="9"></line>
+                <line x1="9" y1="21" x2="9" y2="9"></line>
+            </svg>
+        </div>
+        <!-- Alarm Bell -->
+        <div id="alarm-btn" class="icon-btn">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>
+            </svg>
+        </div>
+    </div>
+
+    <div id="alarm-settings" class="alarm-panel">
+        <label>Мин: <span id="alarm-min-val">18°C</span></label>
+        <input type="range" id="alarm-min" min="0" max="40" value="18" step="0.5">
+        <label>Макс: <span id="alarm-max-val">28°C</span></label>
+        <input type="range" id="alarm-max" min="0" max="40" value="28" step="0.5">
+    </div>
+
+    <div id="status" class="status-tag">Ожидание...</div>
     
     <div class="gauge-wrapper">
         <svg viewBox="-15 -10 150 100" class="gauge-svg">
@@ -62,249 +185,217 @@
                 <linearGradient id="gauge-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
                     <stop offset="0%" stop-color="#4dadff" />   
                     <stop offset="55%" stop-color="#2ecc71" />  
-                    <stop offset="80%" stop-color="#f1c40f" />  
                     <stop offset="100%" stop-color="#e74c3c" /> 
                 </linearGradient>
             </defs>
             <path class="gauge-track" d="M 10 60 A 50 50 0 0 1 110 60" />
             <path id="gauge-fill" class="gauge-fill" d="M 10 60 A 50 50 0 0 1 110 60" />
-            <circle id="gauge-dot" class="gauge-dot" r="5" cx="10" cy="60" />
         </svg>
-
         <div class="temp-main">
             <div id="temp" class="value">--.-</div>
-            <div id="status-desc" class="status-text">ПОДКЛЮЧИТЕСЬ</div>
+            <div id="status-desc" class="status-text">IDLE</div>
         </div>
     </div>
 
-    <div class="trend-row">
-        <div class="extreme-pill">
-            <span class="ex-label">Min</span>
-            <span id="t-min" class="ex-val">--.-</span>
-        </div>
-        <div id="temp-trend" class="trend-box trend-stable">Ожидание...</div>
-        <div class="extreme-pill">
-            <span class="ex-label">Max</span>
-            <span id="t-max" class="ex-val">--.-</span>
-        </div>
+    <div class="trend-row" style="display: flex; justify-content: space-around; margin: 10px 0;">
+        <div style="color: var(--accent-blue); font-weight: 700;">Min: <span id="t-min">--.-</span></div>
+        <div style="color: var(--accent-red); font-weight: 700;">Max: <span id="t-max">--.-</span></div>
     </div>
 
     <div class="info-grid">
-        <div class="info-item"><div class="info-label">Влажность</div><div id="hum" class="info-val">--.- %</div></div>
-        <div class="info-item"><div class="info-label">Батарея</div><div id="battery" class="info-val">-- %</div></div>
-        <div class="info-item"><div class="info-label">Телефон</div><div id="phone-battery" class="info-val">-- %</div></div>
-        <div class="info-item"><div class="info-label">Обновлено</div><div id="last-update" class="info-val">--:--</div></div>
+        <div class="info-item"><div class="info-label">Влажность</div><div id="hum" class="info-val">-- %</div></div>
+        <div class="info-item"><div class="info-label">Заряд</div><div id="battery" class="info-val">-- %</div></div>
+        <div class="info-item" style="grid-column: span 2;"><div class="info-label">Обновлено</div><div id="last-update" class="info-val">--:--:--</div></div>
     </div>
 
-    <button id="connect">Запустить Мастер-узел</button>
+    <button id="connect">Подключить Датчик</button>
 </div>
 
-<audio id="silent-audio" loop><source src="https://raw.githubusercontent.com/anars/blank-audio/master/10-seconds-of-silence.mp3" type="audio/mp3"></audio>
+<div id="toast"></div>
+
+<audio id="silent-audio" loop preload="auto">
+    <source src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==" type="audio/wav">
+</audio>
 
 <script>
     const connectBtn = document.getElementById('connect');
     const tempDisplay = document.getElementById('temp');
     const statusDesc = document.getElementById('status-desc');
-    const trendDisplay = document.getElementById('temp-trend');
     const minDisplay = document.getElementById('t-min');
     const maxDisplay = document.getElementById('t-max');
     const humDisplay = document.getElementById('hum');
     const batteryDisplay = document.getElementById('battery');
-    const phoneBattDisplay = document.getElementById('phone-battery');
     const timeDisplay = document.getElementById('last-update');
     const statusTag = document.getElementById('status');
-    const silentAudio = document.getElementById('silent-audio');
     const gaugeFill = document.getElementById('gauge-fill');
-    const gaugeDot = document.getElementById('gauge-dot');
+    const mainCard = document.getElementById('main-card');
+    const widgetToggle = document.getElementById('widget-toggle');
+
+    const alarmBtn = document.getElementById('alarm-btn');
+    const alarmPanel = document.getElementById('alarm-settings');
+    const alarmMinInput = document.getElementById('alarm-min');
+    const alarmMaxInput = document.getElementById('alarm-max');
+    const alarmMinValLabel = document.getElementById('alarm-min-val');
+    const alarmMaxValLabel = document.getElementById('alarm-max-val');
 
     const TOPIC = "atc_sensor/pwa_monitor_unique_777"; 
-    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+    const MQTT_BROKER = 'wss://broker.emqx.io:8084/mqtt';
+    const client = mqtt.connect(MQTT_BROKER);
 
     let isMaster = false;
     let bluetoothDevice = null;
-    let bleServer = null;
-    
-    let syncData = {
-        t: null, h: null, b: null, pb: null, 
-        min: Infinity, max: -Infinity, trend: "0.00", trendClass: "trend-stable"
+    let lastAlertTime = 0;
+    let swRegistration = null;
+
+    let alarmConfig = {
+        enabled: localStorage.getItem('alarm_enabled') === 'true',
+        min: parseFloat(localStorage.getItem('alarm_min')) || 18,
+        max: parseFloat(localStorage.getItem('alarm_max')) || 28
     };
 
-    let tempHistory = [];
-    let wakeLock = null;
+    let syncData = { t: null, h: null, b: null, min: Infinity, max: -Infinity };
 
-    function updateGauge(temp) {
-        const minScale = 0; const maxScale = 35;
-        let percent = (temp - minScale) / (maxScale - minScale);
-        percent = Math.max(0, Math.min(1, percent));
-        
-        const fullArc = 157; 
-        gaugeFill.style.strokeDashoffset = (fullArc - (percent * fullArc)).toString();
-        
-        const angle = Math.PI + (percent * Math.PI);
-        const r = 50, cx = 60, cy = 60;
-        gaugeDot.setAttribute('cx', cx + r * Math.cos(angle));
-        gaugeDot.setAttribute('cy', cy + r * Math.sin(angle));
+    // Widget Mode Logic
+    widgetToggle.onclick = () => {
+        document.body.classList.toggle('widget-mode');
+        showToast(document.body.classList.contains('widget-mode') ? "Режим виджета" : "Обычный режим");
+    };
 
-        if (temp >= 17 && temp <= 24.5) { statusDesc.innerText = "ИДЕАЛЬНО"; statusDesc.style.color = "#2ecc71"; }
-        else if (temp > 24.5 && temp <= 28) { statusDesc.innerText = "НОРМАЛЬНО"; statusDesc.style.color = "#f1c40f"; }
-        else if (temp > 28) { statusDesc.innerText = "ОПАСНО: ЖАРА"; statusDesc.style.color = "#e74c3c"; }
-        else { statusDesc.innerText = "ХОЛОДНО"; statusDesc.style.color = "#4dadff"; }
+    // Alarm UI Init
+    alarmMinInput.value = alarmConfig.min;
+    alarmMaxInput.value = alarmConfig.max;
+    alarmMinValLabel.innerText = alarmConfig.min + '°';
+    alarmMaxValLabel.innerText = alarmConfig.max + '°';
+    if (alarmConfig.enabled) alarmBtn.classList.add('active');
+
+    function showToast(msg) {
+        const t = document.getElementById('toast');
+        t.innerText = msg;
+        t.style.display = 'block';
+        setTimeout(() => t.style.display = 'none', 2000);
     }
 
-    function calculateMasterStats(newTemp) {
-        const val = parseFloat(newTemp);
+    function sendAlert(title, body) {
         const now = Date.now();
-
-        if (val < syncData.min) syncData.min = val;
-        if (val > syncData.max) syncData.max = val;
-
-        tempHistory.push({ val: val, time: now });
-        tempHistory = tempHistory.filter(item => item.time > now - 10 * 60 * 1000);
+        if (now - lastAlertTime < 30000) return;
         
-        if (tempHistory.length > 2) {
-            const diff = (tempHistory[tempHistory.length-1].val - tempHistory[0].val);
-            syncData.trend = (diff > 0 ? '+' : '') + diff.toFixed(2);
-            syncData.trendClass = diff > 0.05 ? "trend-up" : (diff < -0.05 ? "trend-down" : "trend-stable");
+        if ('speechSynthesis' in window) {
+            const ut = new SpeechSynthesisUtterance(body);
+            ut.lang = 'ru-RU';
+            window.speechSynthesis.speak(ut);
+        }
+
+        if (swRegistration && Notification.permission === 'granted') {
+            swRegistration.showNotification(title, { body: body, tag: 'temp-alert' });
+        }
+        lastAlertTime = now;
+    }
+
+    function checkAlarms(temp) {
+        if (!alarmConfig.enabled) return;
+        const t = parseFloat(temp);
+        if (t > alarmConfig.max) {
+            mainCard.classList.add('alarm-triggered');
+            sendAlert("Критический нагрев!", `Температура: ${t}°C`);
+        } else if (t < alarmConfig.min) {
+            mainCard.classList.add('alarm-triggered');
+            sendAlert("Низкая температура!", `Температура: ${t}°C`);
+        } else {
+            mainCard.classList.remove('alarm-triggered');
         }
     }
 
-    function updateUI(data, fromCloud = false) {
+    alarmBtn.onclick = async (e) => {
+        e.stopPropagation();
+        alarmPanel.classList.toggle('show');
+        if (!alarmPanel.classList.contains('show')) {
+            if (Notification.permission !== 'granted') await Notification.requestPermission();
+            alarmBtn.classList.toggle('active');
+            alarmConfig.enabled = alarmBtn.classList.contains('active');
+            localStorage.setItem('alarm_enabled', alarmConfig.enabled);
+            showToast(alarmConfig.enabled ? "Оповещения ВКЛ" : "Оповещения ВЫКЛ");
+        }
+    };
+
+    alarmMinInput.oninput = () => {
+        alarmConfig.min = parseFloat(alarmMinInput.value);
+        alarmMinValLabel.innerText = alarmConfig.min + '°';
+        localStorage.setItem('alarm_min', alarmConfig.min);
+    };
+
+    alarmMaxInput.oninput = () => {
+        alarmConfig.max = parseFloat(alarmMaxInput.value);
+        alarmMaxValLabel.innerText = alarmConfig.max + '°';
+        localStorage.setItem('alarm_max', alarmConfig.max);
+    };
+
+    function updateGauge(temp) {
+        const minS = 0, maxS = 40;
+        let p = (temp - minS) / (maxS - minS);
+        p = Math.max(0, Math.min(1, p));
+        gaugeFill.style.strokeDashoffset = (157 - (p * 157)).toString();
+
+        if (temp >= 18 && temp <= 25) { statusDesc.innerText = "OK"; statusDesc.style.color = "#2ecc71"; }
+        else if (temp > 25) { statusDesc.innerText = "HOT"; statusDesc.style.color = "#e74c3c"; }
+        else { statusDesc.innerText = "COLD"; statusDesc.style.color = "#4dadff"; }
+        checkAlarms(temp);
+    }
+
+    function updateUI(data) {
         if (data.t) {
             tempDisplay.innerText = data.t;
             updateGauge(parseFloat(data.t));
+            if (data.t < syncData.min) syncData.min = parseFloat(data.t);
+            if (data.t > syncData.max) syncData.max = parseFloat(data.t);
+            minDisplay.innerText = syncData.min.toFixed(1);
+            maxDisplay.innerText = syncData.max.toFixed(1);
         }
-        if (data.h) humDisplay.innerText = data.h + " %";
-        if (data.b) batteryDisplay.innerText = data.b + " %";
-        if (data.pb) phoneBattDisplay.innerText = data.pb + " %";
-        
-        if (data.min !== undefined && data.min !== Infinity) minDisplay.innerText = data.min.toFixed(1);
-        if (data.max !== undefined && data.max !== -Infinity) maxDisplay.innerText = data.max.toFixed(1);
-        if (data.trend !== undefined) {
-            trendDisplay.innerText = data.trend + " °C (10м)";
-            trendDisplay.className = "trend-box " + (data.trendClass || "trend-stable");
-        }
-
-        timeDisplay.innerText = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-        
-        if (fromCloud && !isMaster) {
-            statusTag.innerText = "Облако: Онлайн";
-            statusTag.style.color = "#3498db";
-        } else if (isMaster) {
-            statusTag.innerText = "Bluetooth: LIVE (Мастер)";
-            statusTag.style.color = "#2ecc71";
-            broadcast();
-        }
-    }
-
-    async function updatePhoneBattery() {
-        if ('getBattery' in navigator) {
-            const battery = await navigator.getBattery();
-            syncData.pb = Math.round(battery.level * 100);
-            if (isMaster) broadcast();
-        }
+        if (data.h) humDisplay.innerText = data.h + "%";
+        if (data.b) batteryDisplay.innerText = data.b + "%";
+        timeDisplay.innerText = new Date().toLocaleTimeString();
+        if (isMaster) broadcast();
     }
 
     async function startBLE() {
         try {
+            statusTag.innerText = "Поиск...";
             bluetoothDevice = await navigator.bluetooth.requestDevice({ 
                 filters: [{ namePrefix: 'ATC' }, { namePrefix: 'LYWSD03' }], 
                 optionalServices: [0x181a, 0x180f] 
             });
-            
-            bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
-            connectToServer();
-        } catch (err) { console.error(err); }
-    }
-
-    async function connectToServer() {
-        try {
-            bleServer = await bluetoothDevice.gatt.connect();
-            const service = await bleServer.getPrimaryService(0x181a);
-            
+            const server = await bluetoothDevice.gatt.connect();
+            const service = await server.getPrimaryService(0x181a);
             const tChar = await service.getCharacteristic(0x2a6e);
             await tChar.startNotifications();
             tChar.oncharacteristicvaluechanged = (e) => {
                 syncData.t = (e.target.value.getInt16(0, true) / 100).toFixed(1);
-                calculateMasterStats(syncData.t);
                 updateUI(syncData);
             };
-
-            try {
-                const hChar = await service.getCharacteristic(0x2a6f);
-                await hChar.startNotifications();
-                hChar.oncharacteristicvaluechanged = (e) => {
-                    syncData.h = (e.target.value.getUint16(0, true) / 100).toFixed(1);
-                    updateUI(syncData);
-                };
-            } catch(e){}
-
-            updateSensorBattery();
-            
-            connectBtn.innerText = "МАСТЕР: АКТИВЕН";
-            connectBtn.style.background = "#27ae60";
             isMaster = true;
-            
-        } catch (err) {
-            setTimeout(connectToServer, 5000);
-        }
-    }
-
-    async function updateSensorBattery() {
-        if (!bleServer || !bleServer.connected) return;
-        try {
-            const bSrv = await bleServer.getPrimaryService(0x180f);
-            const bChar = await bSrv.getCharacteristic(0x2a19);
-            const bVal = await bChar.readValue();
-            syncData.b = bVal.getUint8(0);
-            updateUI(syncData);
-        } catch(e){}
-        setTimeout(updateSensorBattery, 5 * 60 * 1000);
-    }
-
-    function onDisconnected() {
-        statusTag.innerText = "Переподключение...";
-        setTimeout(connectToServer, 3000);
+            connectBtn.innerText = "МАСТЕР АКТИВЕН";
+            statusTag.innerText = "Bluetooth: OK";
+            showToast("Подключено напрямую");
+        } catch (e) { statusTag.innerText = "Ошибка BLE"; }
     }
 
     function broadcast() {
-        if (client.connected) {
-            client.publish(TOPIC, JSON.stringify(syncData));
-        }
+        if (client.connected && isMaster) client.publish(TOPIC, JSON.stringify(syncData), { retain: true });
     }
 
-    client.on('connect', () => {
-        client.subscribe(TOPIC);
-        statusTag.innerText = "MQTT: ОК";
+    client.on('message', (t, m) => {
+        if (!isMaster) updateUI(JSON.parse(m.toString()));
     });
+    client.subscribe(TOPIC);
 
-    client.on('message', (topic, msg) => {
-        if (!isMaster) {
-            try {
-                const data = JSON.parse(msg.toString());
-                updateUI(data, true);
-            } catch(e){}
-        }
-    });
-
-    connectBtn.onclick = async () => {
-        if (isMaster) return;
-        try {
-            if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
-            silentAudio.play().catch(()=>{});
-            await updatePhoneBattery();
-            setInterval(updatePhoneBattery, 5 * 60 * 1000);
-            await startBLE();
-        } catch (err) { alert(err.message); }
+    connectBtn.onclick = () => {
+        document.getElementById('silent-audio').play().catch(()=>{});
+        startBLE();
     };
 
-    // Регистрация Service Worker для PWA
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('sw.js')
-                .then(reg => console.log('PWA: Ready'))
-                .catch(err => console.log('PWA: Error', err));
-        });
-    }
+    // Service Worker for Push
+    const swBlob = new Blob([`self.addEventListener('push', e => { const d = e.data.json(); self.registration.showNotification(d.title, d); });`], {type: 'application/javascript'});
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register(URL.createObjectURL(swBlob)).then(r => swRegistration = r);
 </script>
 </body>
 </html>
+
